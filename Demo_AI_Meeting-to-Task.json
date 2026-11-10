@@ -1,0 +1,836 @@
+{
+  "name": "Demo AI Meeting-to-Task",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Demo AI Meeting-to-Task (simulasi, bukan kerja klien)\n\nSebelum dijalankan:\n1. Pasang credential di node: Panggil LLM (Header Auth, nama header x-api-key), Persetujuan manusia (Gmail OAuth2), Simpan ke Sheets dan Catat log (Google Sheets).\n2. Buat 1 spreadsheet dengan 2 sheet. Sheet 'Tugas', baris 1: task, owner, due_date, priority, source_quote, needs_review, meeting_title, meeting_date. Sheet 'Log', baris 1: waktu, judul_meeting, status, jumlah_action_items, detail.\n3. Ganti GANTI_DENGAN_ID_SPREADSHEET dan GANTI_DENGAN_EMAIL_PENYETUJU.\n4. Gunakan hanya transkrip fiktif.",
+        "height": 300,
+        "width": 520
+      },
+      "id": "7419e38e-0a47-4140-a2c1-b655414a5b6f",
+      "name": "Catatan setup",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "path": "5059a668-9f60-4168-a305-d5e50581c786",
+        "formTitle": "Meeting ke tugas",
+        "formDescription": "Tempel transkrip meeting (data fiktif) untuk diubah menjadi action items.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Judul meeting",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Tanggal meeting",
+              "fieldType": "date",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Transkrip",
+              "fieldType": "textarea",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "87dcaaad-c1c8-4e4d-aa57-8a8b386dbca0",
+      "name": "Form Transkrip",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2,
+      "position": [
+        0,
+        560
+      ],
+      "webhookId": "5059a668-9f60-4168-a305-d5e50581c786"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-goog-api-key",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ systemInstruction: { parts: [{ text: \"Kamu mengekstrak action items dari transkrip meeting. Balas HANYA dengan JSON valid tanpa teks lain, dengan bentuk: {\\\"summary\\\": string, \\\"action_items\\\": [{\\\"task\\\": string, \\\"owner\\\": string, \\\"due_date\\\": string, \\\"priority\\\": \\\"tinggi\\\" | \\\"sedang\\\" | \\\"rendah\\\", \\\"source_quote\\\": string, \\\"needs_review\\\": boolean}]}. Aturan: jangan menebak. Jika owner atau tenggat tidak disebut di transkrip, isi dengan \\\"tidak disebutkan\\\". source_quote adalah potongan singkat transkrip yang mendasari tugas. needs_review bernilai true jika kamu tidak yakin. Jika tidak ada tugas, action_items berupa array kosong.\" }] }, contents: [{ role: 'user', parts: [{ text: 'Judul meeting: ' + $json['Judul meeting'] + '\\nTanggal: ' + $json['Tanggal meeting'] + '\\n\\nTranskrip:\\n' + $json['Transkrip'] }] }], generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 8192 } }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "109b7034-9ebb-4b79-aa81-364bbb162cd1",
+      "name": "Panggil LLM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        560
+      ],
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const meta = $('Form Transkrip').first().json;\nconst out = [];\nfor (const item of $input.all()) {\n  let valid = false;\n  let error = '';\n  let data = null;\n  try {\n    const cand = (item.json.candidates && item.json.candidates[0]) ? item.json.candidates[0] : null;\n    const parts = (cand && cand.content && cand.content.parts) ? cand.content.parts : [];\n    const raw = parts.map(p => p.text || '').join('');\n    const cleaned = raw.replace(/```json|```/g, '').trim();\n    data = JSON.parse(cleaned);\n    if (typeof data.summary !== 'string' || !Array.isArray(data.action_items)) {\n      throw new Error('Struktur JSON tidak sesuai');\n    }\n    if (data.action_items.length === 0) {\n      throw new Error('Tidak ada action item');\n    }\n    for (const a of data.action_items) {\n      if (!a.task) throw new Error('Ada action item tanpa task');\n    }\n    valid = true;\n  } catch (e) {\n    error = e.message;\n  }\n  out.push({ json: {\n    valid,\n    error,\n    meeting_title: meta['Judul meeting'],\n    meeting_date: meta['Tanggal meeting'],\n    summary: data && typeof data.summary === 'string' ? data.summary : '',\n    action_items: data && Array.isArray(data.action_items) ? data.action_items : []\n  }});\n}\nreturn out;"
+      },
+      "id": "06eb36a8-27cc-456a-9188-f3a3177fdba7",
+      "name": "Validasi hasil",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "01951f5a-7726-4a4b-91ea-deae7f73b6ee",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "da756750-0a0d-428f-816a-ee0c988d9e8d",
+      "name": "Cek valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        720,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendAndWait",
+        "sendTo": "GANTI_DENGAN_EMAIL_PENYETUJU",
+        "subject": "=Persetujuan action items: {{ $json.meeting_title }}",
+        "message": "={{ 'Meeting: ' + $json.meeting_title + ' (' + $json.meeting_date + ')\\n\\nRingkasan:\\n' + $json.summary + '\\n\\nAction items:\\n' + $json.action_items.map((a, i) => (i + 1) + '. ' + a.task + ' | owner: ' + a.owner + ' | tenggat: ' + a.due_date + ' | prioritas: ' + a.priority + (a.needs_review ? ' | PERLU DICEK' : '')).join('\\n') }}",
+        "approvalOptions": {
+          "values": {
+            "approvalType": "double"
+          }
+        },
+        "options": {}
+      },
+      "id": "e5935765-40d7-4680-9582-60f6fbe490f3",
+      "name": "Persetujuan manusia",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        960,
+        560
+      ],
+      "webhookId": "82baa23b-50fd-40a7-9f5a-0e7014bf683f",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "050ca9cc-cc61-4ad6-ad1b-b9c19f6575f8",
+              "leftValue": "={{ $json.data.approved }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5d0aacdc-4f34-4f95-b74e-5ac1c8c9c1f3",
+      "name": "Cek disetujui",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $('Validasi hasil').first().json;\nreturn d.action_items.map(a => ({ json: {\n  task: a.task || '',\n  owner: a.owner || 'tidak disebutkan',\n  due_date: a.due_date || 'tidak disebutkan',\n  priority: a.priority || 'sedang',\n  source_quote: a.source_quote || '',\n  needs_review: a.needs_review === true ? 'ya' : 'tidak',\n  meeting_title: d.meeting_title,\n  meeting_date: d.meeting_date\n}}));"
+      },
+      "id": "fbfce653-8ebd-4e4e-b8d9-e387b879a6b2",
+      "name": "Pecah daftar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "GANTI_DENGAN_ID_SPREADSHEET",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Tugas",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Task",
+              "displayName": "Task",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Owner",
+              "displayName": "Owner",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Due_date",
+              "displayName": "Due_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Priority",
+              "displayName": "Priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "source_quote",
+              "displayName": "source_quote",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "needs_review",
+              "displayName": "needs_review",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "meeting_title",
+              "displayName": "meeting_title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "meeting_date",
+              "displayName": "meeting_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "4e4c7eb5-d8d4-4549-b283-807719b745f6",
+      "name": "Simpan ke Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1680,
+        560
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d1e50829-a696-4092-ade5-7c8ac019d585",
+              "name": "waktu",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "94589baa-c4b5-4e21-bfcd-f9c3c337ce33",
+              "name": "judul_meeting",
+              "value": "={{ $('Form Transkrip').first().json['Judul meeting'] }}",
+              "type": "string"
+            },
+            {
+              "id": "805bd05c-97b2-4ccd-a372-c33392d2bf7d",
+              "name": "status",
+              "value": "sukses",
+              "type": "string"
+            },
+            {
+              "id": "e0dc14c9-45aa-4640-8259-8e62b266a789",
+              "name": "jumlah_action_items",
+              "value": "={{ $('Validasi hasil').first().json.action_items.length }}",
+              "type": "number"
+            },
+            {
+              "id": "c43a0d63-8a92-4bb6-a5fe-4499dd9e00fb",
+              "name": "detail",
+              "value": "Semua action item tersimpan",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0b8d8f56-e0aa-415b-8055-876c0dc9cc09",
+      "name": "Status sukses",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1920,
+        560
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e18925e5-c41a-4846-8a87-b372c76f7183",
+              "name": "waktu",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "072b2181-f32d-418a-bfd8-f84b66ee024b",
+              "name": "judul_meeting",
+              "value": "={{ $('Form Transkrip').first().json['Judul meeting'] }}",
+              "type": "string"
+            },
+            {
+              "id": "653251b6-cc35-4504-953b-ee92795190c8",
+              "name": "status",
+              "value": "gagal LLM",
+              "type": "string"
+            },
+            {
+              "id": "5c762d28-9615-4937-ac17-530d28855606",
+              "name": "jumlah_action_items",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "6d36bf48-992c-4d5b-9630-1d060ef9087b",
+              "name": "detail",
+              "value": "={{ $json.error ? ($json.error.message || 'Panggilan LLM gagal') : 'Panggilan LLM gagal' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "979648fe-8570-41b7-9ebf-2af1844d31f0",
+      "name": "Status gagal LLM",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        352,
+        832
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "dac46a64-2bf1-42e9-a836-ccade4981b0b",
+              "name": "waktu",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "4648a8d8-c8f9-4cb1-ad6c-0b5009b6c5ca",
+              "name": "judul_meeting",
+              "value": "={{ $('Form Transkrip').first().json['Judul meeting'] }}",
+              "type": "string"
+            },
+            {
+              "id": "2427ea80-f9b2-46f1-97a6-8b07c2220b43",
+              "name": "status",
+              "value": "gagal validasi",
+              "type": "string"
+            },
+            {
+              "id": "731289c9-72e5-45ed-a7a1-d1678170baf3",
+              "name": "jumlah_action_items",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "08228708-2a12-4067-af58-633420ab9990",
+              "name": "detail",
+              "value": "={{ $json.error }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "76430f5a-8fe5-4c03-9427-7019213a150c",
+      "name": "Status gagal validasi",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        736,
+        832
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "244f26f9-e197-47c4-bd34-1cb46b58564e",
+              "name": "waktu",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "afea9e73-8668-4135-85df-c6642dd2c01c",
+              "name": "judul_meeting",
+              "value": "={{ $('Form Transkrip').first().json['Judul meeting'] }}",
+              "type": "string"
+            },
+            {
+              "id": "cc9675fd-8237-43e5-ba6f-86d00e976f20",
+              "name": "status",
+              "value": "ditolak atau tidak ada respon",
+              "type": "string"
+            },
+            {
+              "id": "88b81945-d245-46dd-bf97-1564e84d5b84",
+              "name": "jumlah_action_items",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "ade09e06-e512-4525-98aa-d19143d7c447",
+              "name": "detail",
+              "value": "={{ ($json.data && $json.data.approved === false) ? 'Ditolak oleh penyetuju' : 'Tidak ada respon atau gagal kirim' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a3ea766e-2f81-44b4-961f-a4641ba26751",
+      "name": "Status ditolak",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1248,
+        832
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5e122e65-d5b1-4905-80e7-9803427d2c69",
+              "name": "waktu",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "33d6eba6-5dfe-44f3-803c-26468863b215",
+              "name": "judul_meeting",
+              "value": "={{ $('Form Transkrip').first().json['Judul meeting'] }}",
+              "type": "string"
+            },
+            {
+              "id": "b9be8b59-2a20-40cd-ac61-e91140371b2b",
+              "name": "status",
+              "value": "gagal simpan",
+              "type": "string"
+            },
+            {
+              "id": "4435e287-4ffd-4716-87de-2230596d9558",
+              "name": "jumlah_action_items",
+              "value": "={{ $('Validasi hasil').first().json.action_items.length }}",
+              "type": "number"
+            },
+            {
+              "id": "8b5352e0-c795-4062-aea2-ca3f908068df",
+              "name": "detail",
+              "value": "={{ $json.error ? ($json.error.message || 'Gagal menyimpan ke Sheets') : 'Gagal menyimpan ke Sheets' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "169c666a-f76c-4f5a-b5ae-d58c26e56a51",
+      "name": "Status gagal simpan",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1680,
+        832
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "GANTI_DENGAN_ID_SPREADSHEET",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Log",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "waktu": "={{ $json.waktu }}",
+            "judul_meeting": "={{ $json.judul_meeting }}",
+            "status": "={{ $json.status }}",
+            "jumlah_action_items": "={{ $json.jumlah_action_items }}",
+            "detail": "={{ $json.detail }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "waktu",
+              "displayName": "waktu",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "judul_meeting",
+              "displayName": "judul_meeting",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "jumlah_action_items",
+              "displayName": "jumlah_action_items",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "detail",
+              "displayName": "detail",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "dff0cfc9-7922-4dc8-a6c2-78d92cc209e6",
+      "name": "Catat log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -128,
+        1184
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Form Transkrip": {
+      "main": [
+        [
+          {
+            "node": "Panggil LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Panggil LLM": {
+      "main": [
+        [
+          {
+            "node": "Validasi hasil",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Status gagal LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validasi hasil": {
+      "main": [
+        [
+          {
+            "node": "Cek valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cek valid": {
+      "main": [
+        [
+          {
+            "node": "Persetujuan manusia",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Status gagal validasi",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persetujuan manusia": {
+      "main": [
+        [
+          {
+            "node": "Cek disetujui",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Status ditolak",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cek disetujui": {
+      "main": [
+        [
+          {
+            "node": "Pecah daftar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Status ditolak",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pecah daftar": {
+      "main": [
+        [
+          {
+            "node": "Simpan ke Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simpan ke Sheets": {
+      "main": [
+        [
+          {
+            "node": "Status sukses",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Status gagal simpan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status sukses": {
+      "main": [
+        [
+          {
+            "node": "Catat log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status gagal LLM": {
+      "main": [
+        [
+          {
+            "node": "Catat log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status gagal validasi": {
+      "main": [
+        [
+          {
+            "node": "Catat log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status ditolak": {
+      "main": [
+        [
+          {
+            "node": "Catat log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status gagal simpan": {
+      "main": [
+        [
+          {
+            "node": "Catat log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "86f82f19-1216-4517-ae50-7706977976f9",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "id": "ZULb2TUI19xAFFLL",
+  "tags": []
+}
