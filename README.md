@@ -10,7 +10,7 @@ Workflow n8n yang mengubah transkrip meeting menjadi daftar tugas terstruktur. S
 
 [Tonton demo](https://www.loom.com/share/aec8c89f7b814478a7703e3db74a257d)
 
-[Demo Meeting-to-Task]<img width="1596" height="910" alt="Thumbnail Demo Workflow" src="https://github.com/user-attachments/assets/f0d6c176-5281-4f41-8269-c3656028e26b" />]
+[Demo Meeting-to-Task]<img width="1596" height="910" alt="Thumbnail Demo Workflow" src="https://github.com/user-attachments/assets/f0d6c176-5281-4f41-8269-c3656028e26b" />
 
 ## Masalah yang diselesaikan
 
