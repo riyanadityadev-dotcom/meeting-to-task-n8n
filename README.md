@@ -8,7 +8,7 @@ Workflow n8n yang mengubah transkrip meeting menjadi daftar tugas terstruktur. S
 
 ## Demo
 
-[Tonton demo (2–3 menit)](TEMPEL_LINK_VIDEO_DI_SINI)
+[Tonton demo (2–3 menit)](https://www.loom.com/share/aec8c89f7b814478a7703e3db74a257d)
 
 ![Kanvas workflow](docs/workflow.png)
 
