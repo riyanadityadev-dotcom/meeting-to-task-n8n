@@ -1,91 +1,91 @@
-# Otomasi Meeting-to-Task dengan n8n
+# Meeting-to-Task Automation with n8n
 
-Workflow n8n yang mengubah transkrip meeting menjadi daftar tugas terstruktur. Sebelum disimpan, daftar tugas harus disetujui manusia lewat email. Tugas yang disetujui disimpan ke Google Sheets, dan setiap proses dicatat di log.
+An n8n workflow that turns a meeting transcript into a structured task list. Before anything is saved, a human must approve the list by email. Approved tasks are saved to Google Sheets, and every run is written to a log.
 
-> Proyek demo dengan data fiktif. Bukan pekerjaan klien.
-
-*English summary: an n8n workflow that extracts action items from a meeting transcript with an LLM, requires human approval by email, saves approved tasks to Google Sheets, and logs every run.*
+> Demo project with fictional data. Not client work.
 
 ## Demo
 
-[Klik untuk nonton demo disini](https://www.loom.com/share/aec8c89f7b814478a7703e3db74a257d)
+[Watch the demo video](https://www.loom.com/share/aec8c89f7b814478a7703e3db74a257d) (narrated in Indonesian)
 
 [Demo Meeting-to-Task]<img width="1596" height="910" alt="Thumbnail Demo Workflow" src="https://github.com/user-attachments/assets/f0d6c176-5281-4f41-8269-c3656028e26b" />
 
-## Masalah yang diselesaikan
+## Problem
 
-Tugas hasil meeting sering terlambat dicatat atau terlewat. Ringkasan buatan AI juga bisa keliru. Workflow ini mengekstrak tugas secara otomatis, tetapi tidak menyimpan apa pun sebelum manusia menyetujuinya.
+Tasks from meetings are often recorded late or missed entirely. AI-generated summaries can also be wrong. This workflow extracts tasks automatically, but it does not save anything until a human approves it.
 
-## Siapa yang terlibat
+## Who is involved
 
-- **Pengisi form:** orang yang memegang transkrip meeting, misalnya notulen. Ia menempel transkrip ke form.
-- **Penyetuju:** orang yang bertanggung jawab atas hasil meeting, misalnya manajer proyek. Ia menerima email berisi ringkasan dan daftar tugas, lalu memilih setuju atau tolak.
-- **Penanggung jawab tugas:** orang yang namanya disebut di transkrip. Namanya dicatat AI di kolom `owner`.
+- **Form submitter:** the person who holds the meeting transcript, for example the note-taker. They paste the transcript into the form.
+- **Approver:** the person responsible for the meeting outcome, for example a project manager. They receive an email with the summary and task list, then approve or reject it.
+- **Task owner:** the person named in the transcript. The AI records the name in the `owner` column.
 
-Pengisi form dan penyetuju boleh orang yang sama.
+The form submitter and the approver can be the same person.
 
-## Cara kerja
+## How it works
 
-Form → LLM → Validasi → Persetujuan manusia → Google Sheets → Log
+Form → LLM → Validation → Human approval → Google Sheets → Log
 
-1. **Form:** pengisi form memasukkan judul meeting, tanggal, dan transkrip.
-2. **LLM (Gemini):** model membuat ringkasan dan daftar tugas dalam format JSON. Setiap tugas berisi task, owner, tenggat, prioritas, kutipan sumber, dan penanda `needs_review`.
-3. **Validasi:** node Code memeriksa struktur JSON. Hasil yang kosong atau rusak ditolak.
-4. **Persetujuan manusia:** penyetuju menerima email dan memilih setuju atau tolak.
-5. **Penyimpanan:** tugas yang disetujui ditambahkan ke sheet `Tugas`.
-6. **Log:** hasil setiap proses ditulis ke sheet `Log`.
+1. **Form:** the submitter enters the meeting title, date, and transcript.
+2. **LLM (Gemini):** the model produces a summary and a task list in JSON format. Each task contains the task, owner, due date, priority, source quote, and a `needs_review` flag.
+3. **Validation:** a Code node checks the JSON structure. Empty or malformed output is rejected.
+4. **Human approval:** the approver receives an email and chooses approve or reject.
+5. **Storage:** approved tasks are appended to the `Tugas` sheet.
+6. **Log:** the result of every run is written to the `Log` sheet.
 
-Prompt melarang model menebak. Jika owner atau tenggat tidak disebut di transkrip, nilainya diisi "tidak disebutkan". Tugas yang diragukan model diberi tanda "PERLU DICEK" di email persetujuan.
+The prompt forbids the model from guessing. If the owner or due date is not mentioned in the transcript, the value is set to "tidak disebutkan" (not mentioned). Tasks the model is unsure about are marked "PERLU DICEK" (needs review) in the approval email.
 
-## Cakupan
+> Note: the sheet names (`Tugas` = tasks) and the status values in the log are kept in Indonesian, matching the workflow as built.
 
-Proyek ini mengambil bagian tengah dari rantai otomasi meeting berikut:
+## Scope
 
-Meeting → Transkrip → Ringkasan → Action Items → Penugasan → Follow-up
+This project covers the middle part of the following meeting automation chain:
 
-Status setiap tahap:
+Meeting → Transcript → Summary → Action Items → Assignment → Follow-up
 
-- **Meeting → Transkrip:** belum. Transkrip ditempel manual lewat form.
-- **Ringkasan:** sudah.
-- **Action Items:** sudah, berupa JSON terstruktur yang divalidasi.
-- **Penugasan:** sebagian. Nama penanggung jawab dicatat di Sheets, tetapi penanggung jawab belum dikabari otomatis setelah tugas disetujui.
-- **Follow-up:** belum.
+Status of each stage:
 
-Dua keputusan desain utama:
+- **Meeting → Transcript:** not covered. The transcript is pasted manually through the form.
+- **Summary:** done.
+- **Action Items:** done, as structured and validated JSON.
+- **Assignment:** partial. Task owners are recorded in Sheets, but they are not notified automatically after approval.
+- **Follow-up:** not covered.
 
-- **Persetujuan manusia:** AI hanya mengusulkan tugas. Penyimpanan baru terjadi setelah penyetuju menyetujui.
-- **Log proses:** setiap proses dicatat, baik yang sukses, gagal, maupun ditolak. Log ini dipakai untuk memantau performa workflow.
+Two key design decisions:
 
-## Penanganan error
+- **Human approval:** the AI only proposes tasks. Nothing is saved until the approver accepts them.
+- **Run log:** every run is recorded, whether it succeeded, failed, or was rejected. The log can be used to monitor workflow performance.
 
-Yang terjadi saat error:
+## Error handling
 
-- **Panggilan LLM gagal atau timeout:** dicoba ulang maksimal 4 kali (jeda 5 detik), lalu dicatat sebagai "gagal LLM".
-- **Hasil LLM kosong atau tidak valid:** dicatat sebagai "gagal validasi" beserta pesan errornya.
-- **Penyetuju menolak atau tidak merespons:** dicatat sebagai "ditolak atau tidak ada respon".
-- **Penyimpanan ke Sheets gagal:** dicatat sebagai "gagal simpan".
+What happens when something goes wrong:
 
-## Cara memasang
+- **LLM call fails or times out:** retried up to 4 times (5-second interval), then logged as "gagal LLM" (LLM failed).
+- **LLM output is empty or invalid:** logged as "gagal validasi" (validation failed) with the error message.
+- **Approver rejects or does not respond:** logged as "ditolak atau tidak ada respon" (rejected or no response).
+- **Saving to Sheets fails:** logged as "gagal simpan" (save failed).
 
-1. Import file `Demo_AI_Meeting-to-Task.json` ke n8n.
-2. Buat tiga credential dan pasang ke node yang sesuai:
-   - **Header Auth** untuk node LLM. Isi nama header `x-goog-api-key` dan nilai berupa API key Gemini milikmu.
-   - **Gmail OAuth2** untuk node persetujuan.
-   - **Google Sheets OAuth2** untuk node penyimpanan dan log.
-3. Buat satu spreadsheet dengan dua sheet:
-   - `Tugas`, baris 1: `task, owner, due_date, priority, source_quote, needs_review, meeting_title, meeting_date`
-   - `Log`, baris 1: `waktu, judul_meeting, status, jumlah_action_items, detail`
-4. Ganti `GANTI_DENGAN_ID_SPREADSHEET` dengan ID spreadsheet-mu. Ganti `GANTI_DENGAN_EMAIL_PENYETUJU` dengan email penyetuju.
-5. Buka form, tempel transkrip **fiktif**, lalu jalankan.
+## Setup
 
-Daftar nilai yang perlu disiapkan ada di file `.env.example`.
+1. Import the file `Demo_AI_Meeting-to-Task.json` into n8n.
+2. Create three credentials and attach them to the matching nodes:
+   - **Header Auth** for the LLM node. Set the header name to `x-goog-api-key` and the value to your own Gemini API key.
+   - **Gmail OAuth2** for the approval node.
+   - **Google Sheets OAuth2** for the storage and log nodes.
+3. Create one spreadsheet with two sheets:
+   - `Tugas`, row 1: `task, owner, due_date, priority, source_quote, needs_review, meeting_title, meeting_date`
+   - `Log`, row 1: `waktu, judul_meeting, status, jumlah_action_items, detail`
+4. Replace `GANTI_DENGAN_ID_SPREADSHEET` with your spreadsheet ID. Replace `GANTI_DENGAN_EMAIL_PENYETUJU` with the approver's email address.
+5. Open the form, paste a **fictional** transcript, and run the workflow.
 
-## Teknologi
+The values you need to prepare are listed in the `.env.example` file.
+
+## Tech stack
 
 n8n, Gemini API, Gmail, Google Sheets
 
-## Keterbatasan dan rencana
+## Limitations and roadmap
 
-- Hanya satu penyetuju, dan persetujuan hanya lewat email.
-- Baru diuji dengan transkrip fiktif.
-- Rencana pengembangan: konversi audio ke transkrip, pengiriman tugas ke penanggung jawab setelah disetujui (misalnya lewat email atau Slack), dan pengingat follow-up terjadwal.
+- Only one approver, and approval works through email only.
+- Tested only with fictional transcripts.
+- Planned improvements: audio-to-transcript conversion, sending tasks to their owners after approval (for example via email or Slack), and scheduled follow-up reminders.
